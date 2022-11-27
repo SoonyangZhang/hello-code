@@ -1,12 +1,73 @@
 import requests
 import random
+import io
 '''
 https://blog.csdn.net/guanmaoning/article/details/80158554
 '''
+#https://blog.csdn.net/flyailin/article/details/124782824
+def remove_annotation(code):
+    ret=''
+    length=len(code)
+    i=0
+    flag=0
+    while i<length:
+        next=''
+        if i<length-1:
+            next=code[i+1]
+        if flag==0 and code [i]=='/' and next=='/':
+            break
+        elif flag==0 and code[i]=='/' and next=='*':
+            flag=1
+            i=i+1
+        elif flag==1 and code[i]=='*' and next=='/':
+            flag=0;
+            i=i+1
+        elif flag==1:
+            i=i+1
+            continue
+        else:
+            ret=ret+code[i]
+        i=i+1
+    return ret
+def string_contains(text,token):
+    ret=False
+    for i in range(len(text)):
+        if token==text[i]:
+            ret=True
+            break
+    return ret
+def strip_token(code,token_list):
+    ret=''
+    for i in range(len(code)):
+        if string_contains(token_list,code[i]) is False:
+            ret=ret+code[i]
+    return ret
+def parser_qt(text):
+    f= io.StringIO(text)
+    content=[]
+    locate_caigou8=False
+    while True:
+        line=f.readline()
+        if not line:
+            break
+        else:
+            if locate_caigou8 is False and "0!caigou8" in line:
+                locate_caigou8=True
+            if locate_caigou8:
+                if "success" in line:
+                    break
+                t=line.strip()
+                t=remove_annotation(t)
+                if len(t)>0:
+                    content.append(t)
+    i=2
+    length=len(content)
+    qt=strip_token(content[2],"'+")+strip_token(content[3],"'+")
+    return qt
+
+
 if __name__=='__main__':
-    referer=None
     requests.packages.urllib3.util.ssl_.DEFAULT_CIPHERS += ':HIGH:!DH:!aNULL'
-    url="https://b2b.10086.cn/b2b/main/listVendorNotice.html?noticeType=2"
     ua_list = [
         "Mozilla/5.0 (Windows; U; Windows NT 5.2) Gecko/2008070208 Firefox/3.0.1",
         "Mozilla/5.0 (Windows; U; Windows NT 6.1; en-us) AppleWebKit/534.50 (KHTML, like Gecko) Version/5.1 Safari/534.50",
@@ -34,10 +95,53 @@ if __name__=='__main__':
         ]
     user_Agent=random.choice(ua_list)
     headers = {
-        "Referer":referer,
-        "User-Agent":user_Agent
+        "Referer":None,
+        "User-Agent":user_Agent,
+        'Connection': 'keep-alive',
     }
-    res2 = requests.get(url=url,headers=headers)
-    with open(file="main-page.txt",mode="a") as f:
-        f.write(res2.text)
-    print(res2.status_code,"done")
+    login_url="https://b2b.10086.cn/b2b/main/listVendorNotice.html?noticeType=2"
+    session=requests.session()
+    ret = session.get(url=login_url,headers=headers)
+    cookies = ret.cookies.items()
+    Cookie=''
+    for name,value in cookies:
+        Cookie += '{0}={1};'.format(name, value)
+    referer=login_url
+    url="https://b2b.10086.cn/b2b/main/listVendorNoticeResult.html?noticeBean.noticeType=2"
+    host="b2b.10086.cn"
+    origin='https://b2b.10086.cn'
+    headers = {
+    'User-agent':user_Agent,
+    "cookie": Cookie,
+    'Connection': 'keep-alive',
+    'Accept': '*/*',
+    'Accept-Encoding': 'gzip, deflate, br',
+    'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+    'Host':host,
+    'Referer':referer,
+    'Origin':origin
+    }
+    qt=parser_qt(ret.text)
+    print(qt)
+    pageIndex=1
+    province='YN'
+    #https://zhuanlan.zhihu.com/p/31856224
+    provinceCN='云南'.encode('utf-8')
+    formData={
+        'page.currentPage':pageIndex,
+        'page.perPageSize':20,
+        'noticeBean.sourceCH':provinceCN,
+        'noticeBean.source':province,
+        'noticeBean.title':'',
+        'noticeBean.startDate':'',
+        'noticeBean.endDate':'',
+        '_qt':qt
+    }
+    resp= session.post(url=url,headers=headers,data=formData)
+    session.close()
+    with open(file="main-page.txt",mode="w") as f:
+        f.write(ret.text)
+    print(ret.status_code,"done")
+    with open(file="yun-page.txt",mode="w") as f:
+        f.write(resp.text)
+    print(resp.status_code,"done")
