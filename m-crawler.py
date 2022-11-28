@@ -117,24 +117,42 @@ def login(session,login_url,login_headers):
         cookie=info
         qt=_parser_qt(ret.text)
     return cookie,qt
-    
-login_headers = {
-    "Referer":None,
-    "User-Agent":None,
-    'Connection': 'keep-alive',
-}
-login_url="https://b2b.10086.cn/b2b/main/listVendorNotice.html?noticeType=2"
-referer=login_url
-post_url="https://b2b.10086.cn/b2b/main/listVendorNoticeResult.html?noticeBean.noticeType=2"
-host="b2b.10086.cn"
-origin='https://b2b.10086.cn'
-url_base="https://b2b.10086.cn/b2b/main/viewNoticeContent.html?noticeBean.id="
-def process_notice_page(session,post_url,post_headers,store_path,qt,page_index=1,retry=1):
+def post_request(session,post_url,post_headers,form_data,retry=1):
+    html_content=None
+    i=0
+    while True:
+        resp= session.post(url=post_url,headers=post_headers,data=form_data)
+        if resp.status_code==200:
+            html_content=resp.text
+            break
+        i=i+1
+        if i>retry:
+            break
+        else:
+            time.sleep(1)# try again
+    return html_content
+def process_notice_page(store_path,html_content):
+    pathname=store_path+province+"_"+str(page_index)+".txt"
+    title2id=hp.get_onclick_info(html_content)
+    with open(file=pathname,mode="w") as f:
+        for item in title2id.items():
+            f.write(item[1]+","+item[0]+"\n")
+def login_and_post(session,login_url,login_headers,post_url,post_headers,form_data,retry=5):
+    post_content=None
+    cookie,qt=login(session,login_url,login_headers)
+    if cookie is None:
+        print("oop,login failure,try agian")
+        return post_content
+    post_headers['cookie']=cookie
+    form_data['_qt']=qt
+    post_content=post_request(session,post_url,post_headers,form_data,retry)
+    return post_content
+def login_and_process(session,login_headers,post_headers,page_index,retry=5,info_dir=None):
     per_page_size=20
     province='YN'
     #https://zhuanlan.zhihu.com/p/31856224
     province_ch='云南'.encode('utf-8')
-    formData={
+    form_data={
         'page.currentPage':page_index,
         'page.perPageSize':per_page_size,
         'noticeBean.sourceCH':province_ch,
@@ -142,63 +160,38 @@ def process_notice_page(session,post_url,post_headers,store_path,qt,page_index=1
         'noticeBean.title':'',
         'noticeBean.startDate':'',
         'noticeBean.endDate':'',
-        '_qt':qt
+        '_qt':None
     }
-    success=False
-    html_content=None
-    for i in range (retry):
-        resp= session.post(url=post_url,headers=post_headers,data=formData)
-        if resp.status_code==200:
-            success=True
-            html_content=resp.text
-            break
-        else:
-            time.sleep(1)# try again
-    if success is True:
-        pathname=store_path+province+"_"+str(page_index)+".txt"
-        title2id=hp.get_onclick_info(html_content)
-        with open(file=pathname,mode="w") as f:
-            for item in title2id.items():
-                f.write(item[1]+","+item[0]+"\n")
-    return success
-def login_and_process(info_dir,page_index,retry=5):
-    user_agent=random.choice(ua_list)
-    session=requests.session()
-    login_headers['User-Agent']=user_agent
-    cookie,qt=login(session,login_url,login_headers)
-    print(qt)
-    if cookie is None:
-        print("oop,login failure,try agian")
-        session.close()
-        return 
-    post_headers ={
-    'User-agent':user_agent,
-    "cookie": cookie,
-    'Connection': 'keep-alive',
-    'Accept': '*/*',
-    'Accept-Encoding': 'gzip, deflate, br',
-    'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-    'Host':host,
-    'Referer':referer,
-    'Origin':origin
-    }
-    success=process_notice_page(session,post_url,post_headers,info_dir,qt,page_index,retry)
-    if success is False:
-        session.close()
-        print("fail to download page {}".format(page_index))
+    post_content=login_and_post(session,login_url,login_headers,post_url,post_headers,form_data,retry)
+    if post_content is None:
+        print("fail to download notice page {}".format(page_index))
         return
-    session.close()
-    '''
-    id=901946
-    
-    with open(file="main-page.txt",mode="w") as f:
-        f.write(ret.text)
-    print(ret.status_code,"done")
-    with open(file="yun-page.txt",mode="w") as f:
-        f.write(resp.text)
-    print(resp.status_code,"done")
-    open_page(session,login_headers,page_url)
-    '''
+    if info_dir:
+        process_notice_page(info_dir,post_content)
+    return
+login_url="https://b2b.10086.cn/b2b/main/listVendorNotice.html?noticeType=2"
+referer=login_url
+post_url="https://b2b.10086.cn/b2b/main/listVendorNoticeResult.html?noticeBean.noticeType=2"
+host="b2b.10086.cn"
+origin='https://b2b.10086.cn'
+url_base="https://b2b.10086.cn/b2b/main/viewNoticeContent.html?noticeBean.id="
+login_headers = {
+    "Referer":None,
+    "User-Agent":None,
+    'Connection': 'keep-alive',
+}
+post_headers ={
+'User-agent':None,
+'cookie': None,
+'Connection': 'keep-alive',
+'Accept': '*/*',
+'Accept-Encoding': 'gzip, deflate, br',
+'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+'Host':host,
+'Referer':referer,
+'Origin':origin
+}
+
 def open_page(session,page_url,headers,file_name):
     success=False
     resp = session.get(url=page_url,headers=headers)
@@ -213,10 +206,11 @@ def _extrac_id2title(path_name):
         line_arr= line.strip().split(',')
         dic.update({line_arr[0]:line_arr[1]})
     return dic
-def download_notice_batch(index_list,resource_dir):
+def download_notice_batch(index_list,resource_dir,suffix=".txt"):
     for i in range(len(index_list)):
         user_agent=random.choice(ua_list)
         login_headers['User-Agent']=user_agent
+        post_headers['User-agent']=user_agent
         session=requests.session()
         path_name=index_list[i]
         id2title=_extrac_id2title(path_name)
@@ -225,20 +219,59 @@ def download_notice_batch(index_list,resource_dir):
         name=path_name[pos1+1:pos2]
         new_path=resource_dir+name+'/'
         mkdir(new_path)
+        #login_and_process(session,login_headers,post_headers,1,2)
         for item in id2title.items():
             id=item[0]
-            page_url=url_base+id
-            dest_name=new_path+id+".html"
+            page_url=url_base+id+""
+            dest_name=new_path+id+suffix
             if open_page(session,page_url,login_headers,dest_name) is False:
                 print("download failure {} {}".format(name,dest_name))
         session.close()
+def _write_info_csv(f,count,page_id,title,param,pro):
+    delimiter=','
+    literal=count+delimiter+page_id+delimiter+title+delimiter
+    contents=[param.bf_tax,param.af_tax,param.duration,pro.proxy_company,
+        pro.people,pro.telephone]
+    length=len(contents)
+    for i in range(length):
+        text=contents[i]
+        if len(text)>0:
+            literal=literal+text+delimiter
+        else:
+            literal=literal+delimiter
+    f.write(literal+'\n')
+def process_page_batch(index_list,resource_dir,csv_name,suffix=".txt"):
+    csv_f=open(csv_name,"w")
+    csv_f.write("index,page_id,title,before_tax,after_tax,duration,company,peolpe,tel\n")
+    count=0
+    for i in range(len(index_list)):
+        path_name=index_list[i]
+        id2title=_extrac_id2title(path_name)
+        pos2=path_name.rfind('.')
+        pos1=path_name.rfind('/')
+        name=path_name[pos1+1:pos2]
+        chilld_folder=resource_dir+name+'/'
+        for item in id2title.items():
+            id=item[0]
+            title=item[1]
+            page_name=chilld_folder+id+suffix
+            param=hp.Parameter()
+            pro=hp.Profile()
+            if os.path.exists(page_name):
+                with open(file=page_name,mode="r") as f:
+                    html_content=f.read()
+                    param,pro=hp.parser_notice_content(html_content)
+            _write_info_csv(csv_f,str(count),id,title,param,pro)
+            count=count+1
+        csv_f.close()
 if __name__=='__main__':
     requests.packages.urllib3.util.ssl_.DEFAULT_CIPHERS += ':HIGH:!DH:!aNULL'
     info_dir="page-index/"
-    resource_dir="resource/"
+    resource_dir="resource1/"
     page_index=1
     mkdir(info_dir)
     mkdir(resource_dir)
     #login_and_process(info_dir,page_index)
     index_list=[info_dir+"YN_1.txt"]
-    download_notice_batch(index_list,resource_dir)
+    #download_notice_batch(index_list,resource_dir)
+    process_page_batch(index_list,resource_dir,"result.csv")
