@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*- 
 from bs4 import BeautifulSoup
 import re
 '''
@@ -7,11 +8,11 @@ https://www.jb51.net/article/179145.htm
 '''
 class Parameter:
     def __init__(self):
-        self.bf_tax=''
-        self.af_tax=''
+        self.no_tax=''
+        self.with_tax=''
         self.duration=''
     def __str__(self):
-        return self.bf_tax+self.af_tax+self.duration
+        return self.no_tax+self.with_tax+self.duration
 class Profile:
     def __init__(self):
         self.proxy_company=''
@@ -75,8 +76,8 @@ def _get_divset_list(div_set):
 Regx = re.compile("(([1-9]\\d*[\\d,，]*\\.?\\d*)|(0\\.[0-9]+))(元|百万|万元|亿元|万|亿)")
 RegPhone=re.compile("(13\d{9}|14[5|7]\d{8}|15\d{9}|166{\d{8}|17[3|6|7]{\d{8}|18\d{9})")
 def _get_budget_text(text):
-    bf_tax=''
-    af_tax=''
+    no_tax=''
+    with_tax=''
     i=0
     length=len(text)
     pos1=text.find("不含税")
@@ -85,7 +86,7 @@ def _get_budget_text(text):
     if pos1>=0:
         pos2=text.find("元",pos1)
         if pos2>=0:
-            bf_tax=text[pos1:pos2+1]
+            no_tax=text[pos1:pos2+1]
             remain=text[0:pos1]+text[pos2+1:length]
     pos2=-1
     text=remain
@@ -94,22 +95,22 @@ def _get_budget_text(text):
         if pos1>=0:
             pos2=text.find("元",pos1)
             if pos2>=0:
-                af_tax=text[pos1:pos2+1]
-    return bf_tax,af_tax
+                with_tax=text[pos1:pos2+1]
+    return no_tax,with_tax
 def _parser_parameter(contents):
     param=Parameter()
     length=len(contents)
     for i in range(length):
         if "元" in contents[i]:
-            bf_tax,af_tax=_get_budget_text(contents[i])
-            if bf_tax and len(bf_tax)>0:
-                res=Regx.search(bf_tax)
+            no_tax,with_tax=_get_budget_text(contents[i])
+            if no_tax and len(no_tax)>0:
+                res=Regx.search(no_tax)
                 if res:
-                    param.bf_tax=res.group()
-            if af_tax and len(af_tax)>0:
-                res=Regx.search(af_tax)
+                    param.no_tax=res.group()
+            if with_tax and len(with_tax)>0:
+                res=Regx.search(with_tax)
                 if res:
-                    param.af_tax=res.group()
+                    param.with_tax=res.group()
             continue
         if len(param.duration) ==0:
             text=contents[i]

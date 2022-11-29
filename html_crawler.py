@@ -1,9 +1,10 @@
+# -*- coding: utf-8 -*- 
 import requests
 import random
-import io
-import time
-import os
+import io,os,time
+import logging
 import html_parser as hp
+import fun_misc as fm
 '''
 https://blog.csdn.net/guanmaoning/article/details/80158554
 '''
@@ -32,19 +33,6 @@ ua_list = [
     "Mozilla/5.0 (Windows; U; Windows NT 5.1) Gecko/20070309 Firefox/2.0.0.3",
     "Mozilla/5.0 (Windows; U; Windows NT 5.1) Gecko/20070803 Firefox/1.5.0.12 "
     ]
-def remove_dir(top):
-    for root, dirs, files in os.walk(top, topdown=False):
-        for name in files:
-            os.remove(os.path.join(root, name))
-        for name in dirs:
-            os.rmdir(os.path.join(root, name))
-    if os.path.exists(top):
-        os.rmdir(top)
-def mkdir(path):
-    folder = os.path.exists(path)
-    if not folder:    
-        os.makedirs(path)
-
 #https://blog.csdn.net/flyailin/article/details/124782824
 def _remove_annotation(code):
     ret=''
@@ -105,8 +93,8 @@ def _parser_qt(text):
     qt=_strip_token(content[2],"'+")+_strip_token(content[3],"'+")
     return qt
 def login(session,login_url,login_headers):
-    cookie=None
-    qt=None
+    cookie=''
+    qt=''
     ret = session.get(url=login_url,headers=login_headers)
     status_code=ret.status_code
     if status_code==200:
@@ -117,58 +105,27 @@ def login(session,login_url,login_headers):
         cookie=info
         qt=_parser_qt(ret.text)
     return cookie,qt
-def post_request(session,post_url,post_headers,form_data,retry=1):
+def post_emit(session,post_url,post_headers,form_data,retry=1):
     html_content=None
     i=0
     while True:
         resp= session.post(url=post_url,headers=post_headers,data=form_data)
+        '''
+        if 'Content-Length' in resp.request.headers:
+            logging.info(resp.request.headers['Content-Length'])
+        '''
         if resp.status_code==200:
             html_content=resp.text
             break
         i=i+1
-        if i>retry:
+        if i>=retry:
             break
         else:
             time.sleep(1)# try again
     return html_content
-def process_notice_page(store_path,html_content):
-    pathname=store_path+province+"_"+str(page_index)+".txt"
+def save_notice_page(pathname,html_content):
     title2id=hp.get_onclick_info(html_content)
-    with open(file=pathname,mode="w") as f:
-        for item in title2id.items():
-            f.write(item[1]+","+item[0]+"\n")
-def login_and_post(session,login_url,login_headers,post_url,post_headers,form_data,retry=5):
-    post_content=None
-    cookie,qt=login(session,login_url,login_headers)
-    if cookie is None:
-        print("oop,login failure,try agian")
-        return post_content
-    post_headers['cookie']=cookie
-    form_data['_qt']=qt
-    post_content=post_request(session,post_url,post_headers,form_data,retry)
-    return post_content
-def login_and_process(session,login_headers,post_headers,page_index,retry=5,info_dir=None):
-    per_page_size=20
-    province='YN'
-    #https://zhuanlan.zhihu.com/p/31856224
-    province_ch='云南'.encode('utf-8')
-    form_data={
-        'page.currentPage':page_index,
-        'page.perPageSize':per_page_size,
-        'noticeBean.sourceCH':province_ch,
-        'noticeBean.source':province,
-        'noticeBean.title':'',
-        'noticeBean.startDate':'',
-        'noticeBean.endDate':'',
-        '_qt':None
-    }
-    post_content=login_and_post(session,login_url,login_headers,post_url,post_headers,form_data,retry)
-    if post_content is None:
-        print("fail to download notice page {}".format(page_index))
-        return
-    if info_dir:
-        process_notice_page(info_dir,post_content)
-    return
+    fm.save_title2id(title2id,pathname)
 login_url="https://b2b.10086.cn/b2b/main/listVendorNotice.html?noticeType=2"
 referer=login_url
 post_url="https://b2b.10086.cn/b2b/main/listVendorNoticeResult.html?noticeBean.noticeType=2"
@@ -176,22 +133,51 @@ host="b2b.10086.cn"
 origin='https://b2b.10086.cn'
 url_base="https://b2b.10086.cn/b2b/main/viewNoticeContent.html?noticeBean.id="
 login_headers = {
-    "Referer":None,
-    "User-Agent":None,
+    "Referer":'',
+    "User-Agent":'',
     'Connection': 'keep-alive',
 }
 post_headers ={
-'User-agent':None,
-'cookie': None,
+'User-agent':'',
+'cookie': '',
 'Connection': 'keep-alive',
 'Accept': '*/*',
 'Accept-Encoding': 'gzip, deflate, br',
 'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8',
 'Host':host,
 'Referer':referer,
-'Origin':origin
+'Origin':origin,
+'X-Requested-With':'XMLHttpRequest'
 }
 
+def request_page_index(session,cookie,qt,post_headers,page_index,retry=1,info_dir=None):
+    success=False
+    per_page_size=20
+    province='YN'
+    #https://zhuanlan.zhihu.com/p/31856224
+    province_ch='云南'
+    form_data={
+        'page.currentPage':str(page_index),
+        'page.perPageSize':str(per_page_size),
+        'noticeBean.sourceCH':province_ch,
+        'noticeBean.source':province,
+        'noticeBean.title':'',
+        'noticeBean.startDate':'',
+        'noticeBean.endDate':'',
+        '_qt':qt
+    }
+    post_headers['cookie']=cookie
+    #https://blog.csdn.net/weixin_51111267/article/details/124616848
+    post_content=post_emit(session,post_url,post_headers,form_data,retry)
+    if post_content is None:
+        logging.warn("fail to download notice page {}".format(page_index))
+        return success
+    success=True
+    if info_dir:
+        pathname=info_dir+province+"_"+str(page_index)+".txt"
+        save_notice_page(pathname,post_content)
+    return success
 def open_page(session,page_url,headers,file_name):
     success=False
     resp = session.get(url=page_url,headers=headers)
@@ -200,78 +186,43 @@ def open_page(session,page_url,headers,file_name):
     if resp.status_code==200:
         success=True
     return success
-def _extrac_id2title(path_name):
-    dic={}
-    for index, line in enumerate(open(path_name,'r')):
-        line_arr= line.strip().split(',')
-        dic.update({line_arr[0]:line_arr[1]})
-    return dic
+
 def download_notice_batch(index_list,resource_dir,suffix=".txt"):
+    requests.packages.urllib3.util.ssl_.DEFAULT_CIPHERS += ':HIGH:!DH:!aNULL'
     for i in range(len(index_list)):
         user_agent=random.choice(ua_list)
         login_headers['User-Agent']=user_agent
-        post_headers['User-agent']=user_agent
         session=requests.session()
         path_name=index_list[i]
-        id2title=_extrac_id2title(path_name)
+        id2title=fm.extrac_id2title(path_name)
         pos2=path_name.rfind('.')
         pos1=path_name.rfind('/')
         name=path_name[pos1+1:pos2]
         new_path=resource_dir+name+'/'
-        mkdir(new_path)
-        #login_and_process(session,login_headers,post_headers,1,2)
+        fm.mkdir(new_path)
         for item in id2title.items():
             id=item[0]
             page_url=url_base+id+""
             dest_name=new_path+id+suffix
             if open_page(session,page_url,login_headers,dest_name) is False:
-                print("download failure {} {}".format(name,dest_name))
+                logging.warn("download failure {} {}".format(name,dest_name))
         session.close()
-def _write_info_csv(f,count,page_id,title,param,pro):
-    delimiter=','
-    literal=count+delimiter+page_id+delimiter+title+delimiter
-    contents=[param.bf_tax,param.af_tax,param.duration,pro.proxy_company,
-        pro.people,pro.telephone]
-    length=len(contents)
-    for i in range(length):
-        text=contents[i]
-        if len(text)>0:
-            literal=literal+text+delimiter
-        else:
-            literal=literal+delimiter
-    f.write(literal+'\n')
-def process_page_batch(index_list,resource_dir,csv_name,suffix=".txt"):
-    csv_f=open(csv_name,"w")
-    csv_f.write("index,page_id,title,before_tax,after_tax,duration,company,peolpe,tel\n")
-    count=0
-    for i in range(len(index_list)):
-        path_name=index_list[i]
-        id2title=_extrac_id2title(path_name)
-        pos2=path_name.rfind('.')
-        pos1=path_name.rfind('/')
-        name=path_name[pos1+1:pos2]
-        chilld_folder=resource_dir+name+'/'
-        for item in id2title.items():
-            id=item[0]
-            title=item[1]
-            page_name=chilld_folder+id+suffix
-            param=hp.Parameter()
-            pro=hp.Profile()
-            if os.path.exists(page_name):
-                with open(file=page_name,mode="r") as f:
-                    html_content=f.read()
-                    param,pro=hp.parser_notice_content(html_content)
-            _write_info_csv(csv_f,str(count),id,title,param,pro)
-            count=count+1
-        csv_f.close()
-if __name__=='__main__':
+def download_page_index_batch(page_index_list,store_dir,retry=1):
     requests.packages.urllib3.util.ssl_.DEFAULT_CIPHERS += ':HIGH:!DH:!aNULL'
-    info_dir="page-index/"
-    resource_dir="resource1/"
-    page_index=1
-    mkdir(info_dir)
-    mkdir(resource_dir)
-    #login_and_process(info_dir,page_index)
-    index_list=[info_dir+"YN_1.txt"]
-    #download_notice_batch(index_list,resource_dir)
-    process_page_batch(index_list,resource_dir,"result.csv")
+    fail_list=[]
+    user_agent=random.choice(ua_list)
+    login_headers['User-Agent']=user_agent
+    post_headers['User-agent']=user_agent
+    session=requests.session()
+    cookie,qt=login(session,login_url,login_headers)
+    if len(cookie)==0:
+        logging.warn("oop,login failure,try agian")
+        fail_list=page_index_list
+        return fail_list
+    for i in range(len(page_index_list)):
+        page_index=page_index_list[i]
+        status=request_page_index(session,cookie,qt,post_headers,page_index,retry,store_dir)
+        if status is False:
+            fail_list.append(page_index)
+    session.close()
+    return fail_list
